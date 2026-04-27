@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Push Your Luck</title>
+    <title>Wheel of 13: Race to 200</title>
     <style>
         :root {
             --bg: #020617; --panel: #0f172a; --yellow: #fbbf24; --purple: #a855f7;
@@ -50,31 +50,24 @@
         let availableNumbers = [1, 13, 2, 12, 3, 11, 4, 10, 5, 9, 6, 8, 7];
         let currentNum = null;
         let rotation = 0;
+        let isGameStarted = false;
+        const WIN_SCORE = 200;
 
-        // Personality templates for more exciting logic
         const personalities = ['aggressive', 'strategic', 'wildcard', 'safe'];
-
-        const names = [
-            "YOU", "Kevin Hart", "Jason Kelce", "Lebron James", "Michael Jordan", 
+        const celebrityNames = [
+            "Kevin Hart", "Jason Kelce", "Lebron James", "Michael Jordan", 
             "Patrick Mahomes", "Kanye West", "Jake Paul", "MrBeast", "Shaq", 
             "Jynxzi", "CaseOh", "Andy Reid", "Bill Belichick", "Jesser", 
             "Donald Trump", "Joe Biden", "Barack Obama"
         ];
 
-        // Shuffle player order at the start
-        let players = names
-            .map(name => ({
-                name,
-                score: 0,
-                round: 0,
-                status: 'active',
-                choice: null,
-                isAI: name !== "YOU",
-                hasFree: true,
-                risk: Math.random() * 0.6 + 0.3,
-                personality: personalities[Math.floor(Math.random() * personalities.length)]
-            }))
-            .sort(() => Math.random() - 0.5);
+        let aiPlayers = celebrityNames.map(name => ({
+            name, score: 0, round: 0, status: 'active', choice: null, isAI: true, hasFree: true, wins: 0,
+            risk: Math.random() * 0.6 + 0.3,
+            personality: personalities[Math.floor(Math.random() * personalities.length)]
+        })).sort(() => Math.random() - 0.5);
+
+        let players = [{ name: "YOU", score: 0, round: 0, status: 'active', choice: null, isAI: false, hasFree: true, wins: 0 }, ...aiPlayers];
 
         function drawWheel() {
             const radius = canvas.width / 2;
@@ -108,16 +101,20 @@
         function updateBoard() {
             const list = document.getElementById('player-list');
             list.innerHTML = '';
-            // Sort leaderboard by Score (Banked)
-            const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
-            sortedPlayers.forEach(p => {
+            let displayList = isGameStarted ? [...players].sort((a, b) => b.score - a.score) : players;
+
+            displayList.forEach(p => {
                 const card = document.createElement('div');
+                let trophyText = "";
+                if (p.wins > 0) trophyText = ` 🏆${p.wins > 1 ? ' x' + p.wins : ''}`;
+                
                 let h = p.status;
                 if (p.choice === 'higher') h = 'choosing-high';
                 if (p.choice === 'lower') h = 'choosing-low';
                 if (p.choice === 'free') h = 'choosing-free';
+                
                 card.className = `player-card ${h}`;
-                card.innerHTML = `<span>${p.name}</span><span><b>${p.score}</b></span>`;
+                card.innerHTML = `<span>${p.name}${trophyText}</span><span><b>${p.score}</b></span>`;
                 list.appendChild(card);
             });
             const human = players.find(p => !p.isAI);
@@ -134,12 +131,24 @@
             const first = availableNumbers[Math.floor(Math.random() * availableNumbers.length)];
             await spinTo(first); 
             currentNum = first; 
-            // Count first spin points for everyone
+            isGameStarted = true;
             players.forEach(p => p.round = first);
             drawWheel();
             document.getElementById('center-display').innerText = currentNum; 
             setButtons(true); 
             updateBoard();
+        }
+
+        function checkWinCondition() {
+            const winner = players.find(p => p.score >= WIN_SCORE);
+            if (winner) {
+                winner.wins++;
+                document.getElementById('status').innerText = `${winner.name} WINS THE MATCH! Resetting scores...`;
+                players.forEach(p => p.score = 0);
+                setTimeout(startRound, 4000);
+                return true;
+            }
+            return false;
         }
 
         async function useFree() { 
@@ -149,7 +158,8 @@
         
         function handleBank() { 
             const p = players.find(p => !p.isAI);
-            p.score += p.round; p.round = 0; p.status = 'banked'; setButtons(false); processTurn(); 
+            p.score += p.round; p.round = 0; p.status = 'banked'; setButtons(false); 
+            if (!checkWinCondition()) processTurn(); 
         }
         
         function handleChoice(g) { 
@@ -173,6 +183,8 @@
                     else p.choice = currentNum < 7 ? 'higher' : 'lower';
                 }
             });
+
+            if (checkWinCondition()) return;
 
             updateBoard();
             const pool = availableNumbers.filter(n => n !== currentNum);
