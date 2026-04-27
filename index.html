@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Push Your Luck</title>
+    <style>
+        :root {
+            --bg: #020617; --panel: #0f172a; --yellow: #fbbf24; --purple: #a855f7;
+            --green: #22c55e; --blue: #3b82f6; --red: #ef4444; --text: #f8fafc;
+        }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; display: flex; height: 100vh; overflow: hidden; }
+        #sidebar { width: 340px; background: var(--panel); padding: 20px; border-right: 2px solid #1e293b; overflow-y: auto; }
+        .player-card { background: #1e293b; padding: 12px; margin-bottom: 8px; border-radius: 8px; display: flex; justify-content: space-between; border-left: 6px solid #475569; transition: 0.4s ease; }
+        .choosing-high { border-left-color: var(--yellow); background: #422006; }
+        .choosing-low { border-left-color: var(--purple); background: #3b0764; }
+        .choosing-free { border-left-color: var(--green); background: #064e3b; }
+        .banked { border-left-color: var(--blue); background: #172554; opacity: 0.8; }
+        .bust { border-left-color: var(--red); background: #450a0a; opacity: 0.6; }
+        #main { flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        #wheel-container { position: relative; width: 450px; height: 450px; }
+        canvas { width: 100%; height: 100%; transition: transform 3.5s cubic-bezier(0.15, 0, 0.15, 1); }
+        #center-display { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #000; width: 80px; height: 80px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2.2rem; font-weight: 900; border: 4px solid #334155; z-index: 10; }
+        #pointer { position: absolute; top: -15px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 20px solid transparent; border-right: 20px solid transparent; border-top: 35px solid white; z-index: 20; }
+        .controls { margin-top: 40px; display: flex; gap: 12px; }
+        button { padding: 16px 28px; font-size: 1rem; border: none; border-radius: 10px; cursor: pointer; font-weight: 800; color: white; transition: 0.2s; min-width: 160px; }
+        .btn-high { background: var(--yellow); color: black; }
+        .btn-low { background: var(--purple); }
+        .btn-free { background: var(--green); }
+        .btn-bank { background: var(--blue); }
+        button:disabled { opacity: 0.1; cursor: not-allowed; }
+        #status { margin-top: 20px; font-size: 1.1rem; color: #94a3b8; height: 1.5em; text-align: center; }
+    </style>
+</head>
+<body>
+    <div id="sidebar"><h2>Leaderboard</h2><div id="player-list"></div></div>
+    <div id="main">
+        <div id="wheel-container"><div id="pointer"></div><div id="center-display">?</div><canvas id="wheelCanvas" width="600" height="600"></canvas></div>
+        <p id="status">Ready...</p>
+        <div class="controls">
+            <button id="freeBtn" class="btn-free" onclick="useFree()">FREE SPIN</button>
+            <button id="highBtn" class="btn-high" onclick="handleChoice('higher')">HIGHER</button>
+            <button id="lowBtn" class="btn-low" onclick="handleChoice('lower')">LOWER</button>
+            <button id="bankBtn" class="btn-bank">BANK (0)</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('wheelCanvas');
+        const ctx = canvas.getContext('2d');
+        let availableNumbers = [1, 13, 2, 12, 3, 11, 4, 10, 5, 9, 6, 8, 7];
+        let currentNum = null;
+        let rotation = 0;
+
+        // Personality templates for more exciting logic
+        const personalities = ['aggressive', 'strategic', 'wildcard', 'safe'];
+
+        const names = [
+            "YOU", "Kevin Hart", "Jason Kelce", "Lebron James", "Micheal Jordan", 
+            "Patrick Mahomes", "Kanye West", "Jake Paul", "MrBeast", "Shaq", 
+            "Jynxzi", "CaseOh", "Andy Reid", "Bill Belichick", "Jesser", 
+            "Donald Trump", "Joe Biden", "Barack Obama"
+        ];
+
+        // Shuffle player order at the start
+        let players = names
+            .map(name => ({
+                name,
+                score: 0,
+                round: 0,
+                status: 'active',
+                choice: null,
+                isAI: name !== "YOU",
+                hasFree: true,
+                risk: Math.random() * 0.6 + 0.3,
+                personality: personalities[Math.floor(Math.random() * personalities.length)]
+            }))
+            .sort(() => Math.random() - 0.5);
+
+        function drawWheel() {
+            const radius = canvas.width / 2;
+            const total = availableNumbers.length;
+            if (total === 0) return;
+            const arc = (Math.PI * 2) / total;
+            ctx.clearRect(0,0,600,600);
+            availableNumbers.forEach((num, i) => {
+                const angle = i * arc;
+                ctx.fillStyle = (num === currentNum) ? "#475569" : (currentNum === null ? "#334155" : (num > currentNum ? "#fbbf24" : "#a855f7"));
+                ctx.beginPath(); ctx.moveTo(radius, radius); ctx.arc(radius, radius, radius, angle, angle + arc); ctx.fill();
+                ctx.strokeStyle = "#020617"; ctx.lineWidth = 4; ctx.stroke();
+                ctx.save(); ctx.translate(radius, radius); ctx.rotate(angle + arc/2);
+                ctx.fillStyle = (num > currentNum && currentNum !== null && num !== currentNum) ? "black" : "white";
+                ctx.font = "900 36px sans-serif"; ctx.textAlign = "right"; ctx.fillText(num, radius - 40, 12); ctx.restore();
+            });
+        }
+
+        async function spinTo(num) {
+            if (currentNum !== null) { availableNumbers = availableNumbers.filter(n => n !== currentNum); drawWheel(); }
+            const idx = availableNumbers.indexOf(num);
+            const sliceWidth = 360 / availableNumbers.length;
+            const targetSliceAngle = (idx * sliceWidth) + (sliceWidth / 2);
+            const currentNormalized = rotation % 360;
+            const rotationNeeded = (270 - targetSliceAngle - currentNormalized + 720) % 360;
+            rotation += rotationNeeded + (360 * 5);
+            canvas.style.transform = `rotate(${rotation}deg)`;
+            return new Promise(r => setTimeout(r, 3600));
+        }
+
+        function updateBoard() {
+            const list = document.getElementById('player-list');
+            list.innerHTML = '';
+            // Sort leaderboard by Score (Banked)
+            const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+            sortedPlayers.forEach(p => {
+                const card = document.createElement('div');
+                let h = p.status;
+                if (p.choice === 'higher') h = 'choosing-high';
+                if (p.choice === 'lower') h = 'choosing-low';
+                if (p.choice === 'free') h = 'choosing-free';
+                card.className = `player-card ${h}`;
+                card.innerHTML = `<span>${p.name}</span><span><b>${p.score}</b></span>`;
+                list.appendChild(card);
+            });
+            const human = players.find(p => !p.isAI);
+            document.getElementById('bankBtn').innerText = `BANK (${human.round})`;
+            document.getElementById('bankBtn').onclick = handleBank;
+        }
+
+        async function startRound() {
+            setButtons(false); 
+            availableNumbers = [1, 13, 2, 12, 3, 11, 4, 10, 5, 9, 6, 8, 7]; 
+            currentNum = null;
+            players.forEach(p => { p.status = 'active'; p.round = 0; p.choice = null; p.hasFree = true; });
+            drawWheel();
+            const first = availableNumbers[Math.floor(Math.random() * availableNumbers.length)];
+            await spinTo(first); 
+            currentNum = first; 
+            // Count first spin points for everyone
+            players.forEach(p => p.round = first);
+            drawWheel();
+            document.getElementById('center-display').innerText = currentNum; 
+            setButtons(true); 
+            updateBoard();
+        }
+
+        async function useFree() { 
+            const p = players.find(p => !p.isAI);
+            setButtons(false); p.choice = 'free'; p.hasFree = false; updateBoard(); processTurn(); 
+        }
+        
+        function handleBank() { 
+            const p = players.find(p => !p.isAI);
+            p.score += p.round; p.round = 0; p.status = 'banked'; setButtons(false); processTurn(); 
+        }
+        
+        function handleChoice(g) { 
+            const p = players.find(p => !p.isAI);
+            setButtons(false); p.choice = g; processTurn(); 
+        }
+
+        async function processTurn() {
+            players.forEach(p => {
+                if (!p.isAI || p.status !== 'active') return;
+                const highProb = availableNumbers.filter(n => n > currentNum).length / (availableNumbers.length - 1);
+                
+                if (p.round >= (p.risk * 85)) { 
+                    p.score += p.round; p.round = 0; p.status = 'banked'; 
+                } else if (p.hasFree && (currentNum >= 6 && currentNum <= 8)) {
+                    p.choice = 'free'; p.hasFree = false;
+                } else {
+                    if (p.personality === 'aggressive') p.choice = currentNum < 10 ? 'higher' : 'lower';
+                    else if (p.personality === 'strategic') p.choice = highProb > 0.5 ? 'higher' : 'lower';
+                    else if (p.personality === 'wildcard') p.choice = Math.random() > 0.5 ? 'higher' : 'lower';
+                    else p.choice = currentNum < 7 ? 'higher' : 'lower';
+                }
+            });
+
+            updateBoard();
+            const pool = availableNumbers.filter(n => n !== currentNum);
+            if (pool.length > 0) {
+                const next = pool[Math.floor(Math.random() * pool.length)];
+                await spinTo(next);
+                players.forEach(p => {
+                    if (p.status !== 'active' || !p.choice) return;
+                    if (p.choice === 'free') p.round += next;
+                    else {
+                        const win = (p.choice === 'higher' && next > currentNum) || (p.choice === 'lower' && next < currentNum);
+                        if (win) p.round += next; else { p.round = 0; p.status = 'bust'; }
+                    }
+                    p.choice = null;
+                });
+                currentNum = next; drawWheel(); document.getElementById('center-display').innerText = currentNum; updateBoard();
+                if (players.every(p => p.status !== 'active')) setTimeout(startRound, 3000);
+                else {
+                    const human = players.find(p => !p.isAI);
+                    if (human.status === 'active') setButtons(true);
+                    else setTimeout(processTurn, 1500);
+                }
+            } else setTimeout(startRound, 3000);
+        }
+
+        function setButtons(on) {
+            const human = players.find(p => !p.isAI);
+            document.getElementById('highBtn').disabled = !on; document.getElementById('lowBtn').disabled = !on;
+            document.getElementById('bankBtn').disabled = !on; document.getElementById('freeBtn').disabled = !on || !human.hasFree;
+        }
+
+        updateBoard(); startRound();
+    </script>
+</body>
+</html>
